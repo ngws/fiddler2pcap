@@ -1,3 +1,6 @@
+# ** Original author: Will Metcalf (Emergingthreats). The original comments for this file are below **
+# https://github.com/EmergingThreats/fiddler2pcap
+
 #!/usr/bin/python
 # This is probably useful to like 4 people. Some of the packet inection stuff is taken from rule2alert https://code.google.com/p/rule2alert/ which is GPLv2 so I guess this is well.
 # This ultra alpha if everything isn't right it will fall on its face and probably cause you to run away from it screaming into the night
@@ -5,6 +8,15 @@
 #TODO:
 # 1. Optionally trim request line to start with uripath 
 # 2. Better error checking... Well any error checking really.
+
+################################
+
+# Author (saz2pcap): Nick Griffin (Websense)
+#
+# Updates include:
+# 1. Added linktype, ethernet headers & IP version 4 to packets for better compatibility (ie. you can now import back into Fiddler)
+# 2. Some error checking, still needs more though.
+# 3. Windows compatibility (reading files in binary mode)
 
 import random
 import os
@@ -14,6 +26,8 @@ import zipfile
 import tempfile
 import shutil
 from xml.dom.minidom import parse, parseString
+import logging
+logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 from scapy.utils import PcapWriter
 from scapy.all import *
 import glob
@@ -39,6 +53,9 @@ def validate_ip(ip):
 
 
 (options, args) = parser.parse_args()
+
+print "\n* Input: "  + str(options.input_target)
+
 if options == []:
    print parser.print_help()
    sys.exit(-1)
@@ -55,6 +72,7 @@ if options.dstip and validate_ip(options.dstip):
 
 #Open our packet dumper
 pktdump = PcapWriter(options.output_pcap, sync=True)
+pktdump.linktype = 1 # Ethernet
 
 def build_handshake(src,dst,sport,dport):
     ipsrc   = src
@@ -67,9 +85,9 @@ def build_handshake(src,dst,sport,dport):
 #    server_isn = random.randint(1024, (2**32)-1)
     client_isn = random.randint(1024, 10000)
     server_isn = random.randint(1024, 10000)
-    syn = IP(src=ipsrc, dst=ipdst)/TCP(flags="S", sport=portsrc, dport=portdst, seq=client_isn)
-    synack = IP(src=ipdst, dst=ipsrc)/TCP(flags="SA", sport=portdst, dport=portsrc, seq=server_isn, ack=syn.seq+1)
-    ack = IP(src=ipsrc, dst=ipdst)/TCP(flags="A", sport=portsrc, dport=portdst, seq=syn.seq+1, ack=synack.seq+1)
+    syn = Ether(src="00:01:02:03:04:05",dst="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipsrc, dst=ipdst)/TCP(flags="S", sport=portsrc, dport=portdst, seq=client_isn)
+    synack = Ether(dst="00:01:02:03:04:05",src="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipdst, dst=ipsrc)/TCP(flags="SA", sport=portdst, dport=portsrc, seq=server_isn, ack=syn.seq+1)
+    ack = Ether(src="00:01:02:03:04:05",dst="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipsrc, dst=ipdst)/TCP(flags="A", sport=portsrc, dport=portdst, seq=syn.seq+1, ack=synack.seq+1)
     pktdump.write(syn)
     pktdump.write(synack)
     pktdump.write(ack)
@@ -80,8 +98,8 @@ def build_finshake(src,dst,sport,dport,seq,ack):
     ipdst   = dst
     portsrc = sport
     portdst = dport
-    finAck = IP(src=ipsrc, dst=ipdst)/TCP(flags="FA", sport=sport, dport=dport, seq=seq, ack=ack)
-    finalAck = IP(src=ipdst, dst=ipsrc)/TCP(flags="A", sport=dport, dport=sport, seq=finAck.ack, ack=finAck.seq+1)
+    finAck = Ether(src="00:01:02:03:04:05",dst="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipsrc, dst=ipdst)/TCP(flags="FA", sport=sport, dport=dport, seq=seq, ack=ack)
+    finalAck = Ether(dst="00:01:02:03:04:05",src="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipdst, dst=ipsrc)/TCP(flags="A", sport=dport, dport=sport, seq=finAck.ack, ack=finAck.seq+1)
     pktdump.write(finAck)
     pktdump.write(finalAck)
 
@@ -100,13 +118,15 @@ def make_poop(src,dst,sport,dport,seq,ack,payload):
     portsrc = sport
     portdst = dport
     for segment in segments:
-        p = IP(src=ipsrc, dst=ipdst)/TCP(flags="PA", sport=sport, dport=dport, seq=seq, ack=ack)/segment
-        returnAck = IP(src=ipdst, dst=ipsrc)/TCP(flags="A", sport=dport, dport=sport, seq=p.ack, ack=(p.seq + len(p[Raw])))
+        p = Ether(src="00:01:02:03:04:05",dst="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipsrc, dst=ipdst)/TCP(flags="PA", sport=sport, dport=dport, seq=seq, ack=ack)/segment
+        returnAck = Ether(dst="00:01:02:03:04:05",src="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipdst, dst=ipsrc)/TCP(flags="A", sport=dport, dport=sport, seq=p.ack, ack=(p.seq + len(p[Raw])))
         seq = returnAck.ack
         ack = returnAck.seq
         pktdump.write(p)
         pktdump.write(returnAck)
     return(returnAck.seq,returnAck.ack)
+
+print "* Parsing and outputting...\n"
 
 if options.input_is_saz and os.path.isfile(options.input_target):
     try:
@@ -139,6 +159,7 @@ if os.path.isdir(options.fiddler_raw_dir):
     m_file_list=glob.glob("%s/%s" % (options.fiddler_raw_dir,"*_m.xml")) 
     m_file_list.sort()
     for xml_file in m_file_list:
+        dst=None
         sport=""
         dport=80
         dom = parse(xml_file)
@@ -160,14 +181,38 @@ if os.path.isdir(options.fiddler_raw_dir):
                 src = m.group("clientip")
             elif m and m.group("hostip") and dst == None:
                 dst = m.group("hostip")
-        req = open(options.fiddler_raw_dir + fid + "_c.txt").read()
-        m=re.match(r"^[^\r\n\s]+\s+(?P<host_and_port>https?\:\/\/[^\/\r\n\:]+(\:(?P<dport>\d{1,5}))?)\/",req)
+        
+        req = open(options.fiddler_raw_dir + fid + "_c.txt", "rb").read()
+        m=re.match(r"^[^\r\n\s]+\s+(?P<host_and_port>https?:\/\/(?P<hostname>[^\/\r\n:]+)(\:(?P<dport>\d{1,5}))?)\/",req)
+        
+        # Not an HTTP stream
+        if m == None:
+            continue
+        
+        hostname = m.group("hostname")
         if m and options.dproxy and m.group("host_and_port"):
             req = req.replace(m.group("host_and_port"),"",1)
             if m.group("dport") and int(m.group("dport")) <= 65535:
                 dport = int(m.group("dport"))
-        resp = open(options.fiddler_raw_dir + fid + "_s.txt").read()
-        print "src: %s dst: %s sport: %s dport: %s" % (src, dst, sport, dport)
+        
+        # ** Initiate superl33b checks **
+        # Give it an IP if we've got one from the URL, duh.
+        # No src IP? Well that sucks, let's give it localhost
+        # Dat ugly src port 0? Gah, let's generate a new one for this stream
+        # [TODO: Ask Telerik to make Fiddler SAZ XML files have more metadata so I don't have to hack up shit like this =D]
+        if dst == None:
+            m = re.match(r"^(\d{1,3}\.){3}\d{1,3}$",hostname)
+            if m:
+                dst = hostname
+            else:
+                dst = "0.0.0.0"
+        if src == None:
+            src = "127.0.0.1"
+        if sport == 0:
+            sport = random.randrange(1000,9999)
+        
+        resp = open(options.fiddler_raw_dir + fid + "_s.txt", "rb").read()
+        print "src: %s dst: %s sport: %s dport: %s host: %s" % (src, dst, sport, dport, hostname)
         (seq,ack)=build_handshake(src,dst,sport,dport)
         (seq,ack)=make_poop(src,dst,sport,dport,seq,ack,req)
         (seq,ack)=make_poop(dst,src,dport,sport,seq,ack,resp)
