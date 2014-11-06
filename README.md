@@ -1,7 +1,7 @@
 saz2pcap
 ============
 
-forked from fiddler2pcap, original author is Will Metcalf (Emergingthreats). This version contains many improvements, see the source code for more information.
+Forked from <a href="https://github.com/EmergingThreats/fiddler2pcap">fiddler2pcap</a>, original author is <strong>Will Metcalf</strong> (Emergingthreats). This version contains many improvements, please see the source code for more information.
 
 fiddler output (.saz) to pcap (.pcap)
 
