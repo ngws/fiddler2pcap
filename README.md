@@ -1,16 +1,18 @@
-fiddler2pcap
+saz2pcap
 ============
 
-fiddler output to pcap
+forked from fiddler2pcap, original author is Will Metcalf (Emergingthreats). This version contains many improvements, see the source code for more information.
+
+fiddler output (.saz) to pcap (.pcap)
 
 Example saz file as input
 ./fiddler2pcap.py -i /home/blah/Downloads/Infinity_2014-03-17.saz -o infinity.pcap --saz
 
 Example raw directory as input
-./fiddler2pcap.py -i /tmp/tmpaPRU3T/raw/ -o infinity.pcap
+./saz2pcap.py -i /tmp/tmpaPRU3T/raw/ -o infinity.pcap
 
 Help
-Usage: fiddler2pcap.py [options]
+Usage: saz2pcap.py [options]
 
 Options:
   -h, --help       show this help message and exit
