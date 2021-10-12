@@ -18,20 +18,25 @@
 # 2. Some error checking, still needs more though.
 # 3. Windows compatibility (reading files in binary mode)
 
-import random
-import os
-import sys
-import re
-import zipfile
-import tempfile
-import shutil
-from xml.dom.minidom import parse, parseString
 import logging
+import os
+import random
+import re
+import shutil
+import sys
+import tempfile
+import zipfile
+from xml.dom.minidom import parse
+
+from scapy.layers.inet import IP, TCP
+from scapy.layers.l2 import Ether
+from scapy.packet import Raw
+
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
-from scapy.utils import PcapWriter
-from scapy.all import *
 import glob
 from optparse import OptionParser
+
+from scapy.utils import PcapWriter
 
 parser = OptionParser()
 parser.add_option("-i", dest="input_target", type="string", help="path to fiddler raw directory we will read from glob format or path to saz file with --saz option")
@@ -48,22 +53,22 @@ def validate_ip(ip):
     if re.match(r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$",ip) != None:
         return True
     else:
-        print "The ip address you provides is invalid %s exiting" % (ip)
+        print("The ip address you provides is invalid %s exiting" % (ip))
         sys.exit(-1)
 
 
 (options, args) = parser.parse_args()
 
-print "\n* Input: "  + str(options.input_target)
+print("\n* Input: " + str(options.input_target))
 
 if options == []:
-   print parser.print_help()
+   print(parser.print_help())
    sys.exit(-1)
 if not options.input_target or options.input_target == "":
-   print parser.print_help()
+   print(parser.print_help())
    sys.exit(-1)
 if not options.output_pcap or options.output_pcap == "":
-   print parser.print_help()
+   print(parser.print_help())
    sys.exit(-1)
 if options.srcip and validate_ip(options.srcip):
    src = options.srcip 
@@ -85,9 +90,9 @@ def build_handshake(src,dst,sport,dport):
 #    server_isn = random.randint(1024, (2**32)-1)
     client_isn = random.randint(1024, 10000)
     server_isn = random.randint(1024, 10000)
-    syn = Ether(src="00:01:02:03:04:05",dst="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipsrc, dst=ipdst)/TCP(flags="S", sport=portsrc, dport=portdst, seq=client_isn)
-    synack = Ether(dst="00:01:02:03:04:05",src="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipdst, dst=ipsrc)/TCP(flags="SA", sport=portdst, dport=portsrc, seq=server_isn, ack=syn.seq+1)
-    ack = Ether(src="00:01:02:03:04:05",dst="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipsrc, dst=ipdst)/TCP(flags="A", sport=portsrc, dport=portdst, seq=syn.seq+1, ack=synack.seq+1)
+    syn = Ether(src="00:01:02:03:04:05",dst="06:07:08:09:0a:0b",type=0x800) / IP(version=4, src=ipsrc, dst=ipdst) / TCP(flags="S", sport=portsrc, dport=portdst, seq=client_isn)
+    synack = Ether(dst="00:01:02:03:04:05",src="06:07:08:09:0a:0b",type=0x800) / IP(version=4, src=ipdst, dst=ipsrc) / TCP(flags="SA", sport=portdst, dport=portsrc, seq=server_isn, ack=syn.seq + 1)
+    ack = Ether(src="00:01:02:03:04:05",dst="06:07:08:09:0a:0b",type=0x800) / IP(version=4, src=ipsrc, dst=ipdst) / TCP(flags="A", sport=portsrc, dport=portdst, seq=syn.seq + 1, ack=synack.seq + 1)
     pktdump.write(syn)
     pktdump.write(synack)
     pktdump.write(ack)
@@ -98,8 +103,8 @@ def build_finshake(src,dst,sport,dport,seq,ack):
     ipdst   = dst
     portsrc = sport
     portdst = dport
-    finAck = Ether(src="00:01:02:03:04:05",dst="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipsrc, dst=ipdst)/TCP(flags="FA", sport=sport, dport=dport, seq=seq, ack=ack)
-    finalAck = Ether(dst="00:01:02:03:04:05",src="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipdst, dst=ipsrc)/TCP(flags="A", sport=dport, dport=sport, seq=finAck.ack, ack=finAck.seq+1)
+    finAck = Ether(src="00:01:02:03:04:05",dst="06:07:08:09:0a:0b",type=0x800) / IP(version=4, src=ipsrc, dst=ipdst) / TCP(flags="FA", sport=sport, dport=dport, seq=seq, ack=ack)
+    finalAck = Ether(dst="00:01:02:03:04:05",src="06:07:08:09:0a:0b",type=0x800) / IP(version=4, src=ipdst, dst=ipsrc) / TCP(flags="A", sport=dport, dport=sport, seq=finAck.ack, ack=finAck.seq + 1)
     pktdump.write(finAck)
     pktdump.write(finalAck)
 
@@ -118,37 +123,39 @@ def make_poop(src,dst,sport,dport,seq,ack,payload):
     portsrc = sport
     portdst = dport
     for segment in segments:
-        p = Ether(src="00:01:02:03:04:05",dst="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipsrc, dst=ipdst)/TCP(flags="PA", sport=sport, dport=dport, seq=seq, ack=ack)/segment
-        returnAck = Ether(dst="00:01:02:03:04:05",src="06:07:08:09:0a:0b",type=0x800)/IP(version=4L,src=ipdst, dst=ipsrc)/TCP(flags="A", sport=dport, dport=sport, seq=p.ack, ack=(p.seq + len(p[Raw])))
+        p = Ether(src="00:01:02:03:04:05",dst="06:07:08:09:0a:0b",type=0x800) / IP(version=4, src=ipsrc, dst=ipdst) / TCP(flags="PA", sport=sport, dport=dport, seq=seq, ack=ack) / segment
+        returnAck = Ether(dst="00:01:02:03:04:05",src="06:07:08:09:0a:0b",type=0x800) / IP(version=4, src=ipdst, dst=ipsrc) / TCP(flags="A", sport=dport, dport=sport, seq=p.ack, ack=(p.seq + len(p[Raw])))
         seq = returnAck.ack
         ack = returnAck.seq
         pktdump.write(p)
         pktdump.write(returnAck)
     return(returnAck.seq,returnAck.ack)
 
-print "* Parsing and outputting...\n"
+
+print("* Parsing and outputting...\n")
 
 if options.input_is_saz and os.path.isfile(options.input_target):
     try:
         options.tmpdir = tempfile.mkdtemp()
     except:
-        print "failed to create temp directory for saz extraction"
+        print("failed to create temp directory for saz extraction")
         sys.exit(-1)
     try:
         z = zipfile.ZipFile(options.input_target,"r")
     except:
-        print "failed to open saz file %s" % (options.input_target)
+        print("failed to open saz file %s" % (options.input_target))
         sys.exit(-1)
     try:
        z.extractall(options.tmpdir)
        z.close()
     except:
-       print "failed to extract saz file %s to %s" % (options.input_target, options.tmpdir)
+       print("failed to extract saz file %s to %s" % (options.input_target, options.tmpdir))
        sys.exit(-1)
     if os.path.isdir("%s/raw/" % (options.tmpdir)):
        options.fiddler_raw_dir = "%s/raw/" % (options.tmpdir)
     else:
-       print "failed to find raw directory in extracted files %s/raw (must remove tmp file yourself)" % (options.tmpdir)
+       print(
+           "failed to find raw directory in extracted files %s/raw (must remove tmp file yourself)" % (options.tmpdir))
        sys.exit(-1)
     
 elif os.path.isdir(options.input_target):
@@ -183,7 +190,7 @@ if os.path.isdir(options.fiddler_raw_dir):
                 dst = m.group("hostip")
         
         req = open(options.fiddler_raw_dir + fid + "_c.txt", "rb").read()
-        m=re.match(r"^[^\r\n\s]+\s+(?P<host_and_port>https?:\/\/(?P<hostname>[^\/\r\n:]+)(\:(?P<dport>\d{1,5}))?)\/",req)
+        m=re.match(r"^[^\r\n\s]+\s+(?P<host_and_port>https?:\/\/(?P<hostname>[^\/\r\n:]+)(\:(?P<dport>\d{1,5}))?)\/",str(req))
         
         # Not an HTTP stream
         if m == None:
@@ -212,7 +219,7 @@ if os.path.isdir(options.fiddler_raw_dir):
             sport = random.randrange(1000,9999)
         
         resp = open(options.fiddler_raw_dir + fid + "_s.txt", "rb").read()
-        print "src: %s dst: %s sport: %s dport: %s host: %s" % (src, dst, sport, dport, hostname)
+        print("src: %s dst: %s sport: %s dport: %s host: %s" % (src, dst, sport, dport, hostname))
         (seq,ack)=build_handshake(src,dst,sport,dport)
         (seq,ack)=make_poop(src,dst,sport,dport,seq,ack,req)
         (seq,ack)=make_poop(dst,src,dport,sport,seq,ack,resp)
@@ -222,9 +229,9 @@ if os.path.isdir(options.fiddler_raw_dir):
         try:
             shutil.rmtree(options.tmpdir)
         except:
-            print "failed to clean up tmpdir %s you will have to do it" % (options.tmpdir)
+            print("failed to clean up tmpdir %s you will have to do it" % (options.tmpdir))
 else:
-    print "fiddler raw dir specified:%s dos not exist" % (options.fiddler_raw_dir)
+    print("fiddler raw dir specified:%s dos not exist" % (options.fiddler_raw_dir))
     sys.exit(-1)
 
 pktdump.close()
